@@ -326,16 +326,19 @@ export class AppComponent implements AfterViewInit {
   }
 
   buildDownloadLink(download: Download) {
+    const baseUrl = new URL(window.location.origin);
     let baseDir = this.downloads.configuration["PUBLIC_HOST_URL"];
     if (download.quality == 'audio' || download.filename.endsWith('.mp3')) {
       baseDir = this.downloads.configuration["PUBLIC_HOST_AUDIO_URL"];
     }
 
-    if (download.folder) {
-      baseDir += download.folder + '/';
-    }
+    baseUrl.pathname = [
+      baseDir.replace('/', ''),
+      ...download.filename
+	.split('/')
+    ].join('/');
 
-    return baseDir + encodeURIComponent(download.filename);
+    return baseUrl.toString();
   }
 
   identifyDownloadRow(index: number, row: KeyValue<string, Download>) {
