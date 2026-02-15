@@ -33,14 +33,8 @@ Certain values can be set via environment variables, using the `-e` parameter on
 
 ### ⬇️ Download Behavior
 
-* __DOWNLOAD_MODE__: This flag controls how downloads are scheduled and executed. Options are `sequential`, `concurrent`, and `limited`.  Defaults to `limited`:
-    *   `sequential`: Downloads are processed one at a time. A new download won't start until the previous one has finished. This mode is useful for conserving system resources or ensuring downloads occur in strict order.
-    *   `concurrent`: Downloads are started immediately as they are added, with no built-in limit on how many run simultaneously. This mode may overwhelm your system if too many downloads start at once.
-    *   `limited`: Downloads are started concurrently but are capped by a concurrency limit. In this mode, a semaphore is used so that at most a fixed number of downloads run at any given time.
-* __MAX_CONCURRENT_DOWNLOADS__: This flag is used only when `DOWNLOAD_MODE` is set to `limited`.  
-    It specifies the maximum number of simultaneous downloads allowed. For example, if set to `5`, then at most five downloads will run concurrently, and any additional downloads will wait until one of the active downloads completes. Defaults to `3`. 
+* __MAX_CONCURRENT_DOWNLOADS__: Maximum number of simultaneous downloads allowed. For example, if set to `5`, then at most five downloads will run concurrently, and any additional downloads will wait until one of the active downloads completes. Defaults to `3`. 
 * __DELETE_FILE_ON_TRASHCAN__: if `true`, downloaded files are deleted on the server, when they are trashed from the "Completed" section of the UI. Defaults to `false`.
-* __DEFAULT_OPTION_PLAYLIST_STRICT_MODE__: if `true`, the "Strict Playlist mode" switch will be enabled by default. In this mode the playlists will be downloaded only if the URL strictly points to a playlist. URLs to videos inside a playlist will be treated same as direct video URL. Defaults to `false` .
 * __DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT__: Maximum number of playlist items that can be downloaded. Defaults to `0` (no limit).
 
 ### 📁 Storage & Directories
@@ -55,17 +49,21 @@ Certain values can be set via environment variables, using the `-e` parameter on
 * __TEMP_DIR__: Path where intermediary download files will be saved. Defaults to `/downloads` in the Docker image, and `.` otherwise.
   * Set this to an SSD or RAM filesystem (e.g., `tmpfs`) for better performance.
   * __Note__: Using a RAM filesystem may prevent downloads from being resumed.
+* __CHOWN_DIRS__: If `false`, ownership of `DOWNLOAD_DIR`, `STATE_DIR`, and `TEMP_DIR` (and their contents) will not be set on container start. Ensure user under which MeTube runs has necessary access to these directories already. Defaults to `true`.
 
 ### 📝 File Naming & yt-dlp
 
 * __OUTPUT_TEMPLATE__: The template for the filenames of the downloaded videos, formatted according to [this spec](https://github.com/yt-dlp/yt-dlp/blob/master/README.md#output-template). Defaults to `%(title)s.%(ext)s`.
 * __OUTPUT_TEMPLATE_CHAPTER__: The template for the filenames of the downloaded videos when split into chapters via postprocessors. Defaults to `%(title)s - %(section_number)s %(section_title)s.%(ext)s`.
 * __OUTPUT_TEMPLATE_PLAYLIST__: The template for the filenames of the downloaded videos when downloaded as a playlist. Defaults to `%(playlist_title)s/%(title)s.%(ext)s`. When empty, then `OUTPUT_TEMPLATE` is used.
+* __OUTPUT_TEMPLATE_CHANNEL__: The template for the filenames of the downloaded videos when downloaded as a channel. Defaults to `%(channel)s/%(title)s.%(ext)s`. When empty, then `OUTPUT_TEMPLATE` is used.
 * __YTDL_OPTIONS__: Additional options to pass to yt-dlp in JSON format. [See available options here](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/YoutubeDL.py#L222). They roughly correspond to command-line options, though some do not have exact equivalents here. For example, `--recode-video` has to be specified via `postprocessors`. Also note that dashes are replaced with underscores. You may find [this script](https://github.com/yt-dlp/yt-dlp/blob/master/devscripts/cli_to_api.py) helpful for converting from command-line options to `YTDL_OPTIONS`.
 * __YTDL_OPTIONS_FILE__: A path to a JSON file that will be loaded and used for populating `YTDL_OPTIONS` above. Please note that if both `YTDL_OPTIONS_FILE` and `YTDL_OPTIONS` are specified, the options in `YTDL_OPTIONS` take precedence. The file will be monitored for changes and reloaded automatically when changes are detected.
 
 ### 🌐 Web Server & URLs
 
+* __HOST__: The host address the web server will bind to. Defaults to `0.0.0.0` (all interfaces).
+* __PORT__: The port number the web server will listen on. Defaults to `8081`.
 * __URL_PREFIX__: Base path for the web server (for use when hosting behind a reverse proxy). Defaults to `/`.
 * __PUBLIC_HOST_URL__: Base URL for the download links shown in the UI for completed files. By default, MeTube serves them under its own URL. If your download directory is accessible on another URL and you want the download links to be based there, use this variable to set it.
 * __PUBLIC_HOST_AUDIO_URL__: Same as PUBLIC_HOST_URL but for audio downloads.
@@ -76,8 +74,8 @@ Certain values can be set via environment variables, using the `-e` parameter on
 
 ### 🏠 Basic Setup
 
-* __UID__: User under which MeTube will run. Defaults to `1000`.
-* __GID__: Group under which MeTube will run. Defaults to `1000`.
+* __PUID__: User under which MeTube will run. Defaults to `1000` (legacy `UID` also supported).
+* __PGID__: Group under which MeTube will run. Defaults to `1000` (legacy `GID` also supported).
 * __UMASK__: Umask value used by MeTube. Defaults to `022`.
 * __DEFAULT_THEME__: Default theme to use for the UI, can be set to `light`, `dark`, or `auto`. Defaults to `auto`.
 * __LOGLEVEL__: Log level, can be set to `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, or `NONE`. Defaults to `INFO`. 
@@ -246,7 +244,7 @@ The engine which powers the actual video downloads in MeTube is [yt-dlp](https:/
 
 There's an automatic nightly build of MeTube which looks for a new version of yt-dlp, and if one exists, the build pulls it and publishes an updated docker image. Therefore, in order to keep up with the changes, it's recommended that you update your MeTube container regularly with the latest image.
 
-I recommend installing and setting up [watchtower](https://github.com/containrrr/watchtower) for this purpose.
+I recommend installing and setting up [watchtower](https://github.com/nicholas-fedor/watchtower) for this purpose.
 
 ## 🔧 Troubleshooting and submitting issues
 
@@ -267,13 +265,14 @@ MeTube development relies on code contributions by the community. The program as
 
 ## 🛠️ Building and running locally
 
-Make sure you have Node.js and Python 3.13 installed.
+Make sure you have Node.js 22+ and Python 3.13 installed.
 
 ```bash
-cd metube/ui
 # install Angular and build the UI
-npm install
-node_modules/.bin/ng build
+cd ui
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+pnpm install
+pnpm run build
 # install python dependencies
 cd ..
 curl -LsSf https://astral.sh/uv/install.sh | sh

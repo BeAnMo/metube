@@ -21,6 +21,26 @@ from yt_dlp.version import __version__ as yt_dlp_version
 
 log = logging.getLogger('main')
 
+def parseLogLevel(logLevel):
+    match logLevel:
+        case 'DEBUG':
+            return logging.DEBUG
+        case 'INFO':
+            return logging.INFO
+        case 'WARNING':
+            return logging.WARNING
+        case 'ERROR':
+            return logging.ERROR
+        case 'CRITICAL':
+            return logging.CRITICAL
+        case _:
+            return None
+
+# Configure logging before Config() uses it so early messages are not dropped.
+# Only configure if no handlers are set (avoid clobbering hosting app settings).
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(level=parseLogLevel(os.environ.get('LOGLEVEL', 'INFO')) or logging.INFO)
+
 class Config:
     _DEFAULTS = {
         'DOWNLOAD_DIR': '.',
@@ -36,9 +56,9 @@ class Config:
         'PUBLIC_HOST_URL': 'download/',
         'PUBLIC_HOST_AUDIO_URL': 'audio_download/',
         'OUTPUT_TEMPLATE': '%(title)s.%(ext)s',
-        'OUTPUT_TEMPLATE_CHAPTER': '%(title)s - %(section_number)s %(section_title)s.%(ext)s',
+        'OUTPUT_TEMPLATE_CHAPTER': '%(title)s - %(section_number)02d - %(section_title)s.%(ext)s',
         'OUTPUT_TEMPLATE_PLAYLIST': '%(playlist_title)s/%(title)s.%(ext)s',
-        'DEFAULT_OPTION_PLAYLIST_STRICT_MODE' : 'false',
+        'OUTPUT_TEMPLATE_CHANNEL': '%(channel)s/%(title)s.%(ext)s',
         'DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT' : '0',
         'YTDL_OPTIONS': '{}',
         'YTDL_OPTIONS_FILE': '',
@@ -50,13 +70,12 @@ class Config:
         'KEYFILE': '',
         'BASE_DIR': '',
         'DEFAULT_THEME': 'auto',
-        'DOWNLOAD_MODE': 'limited',
         'MAX_CONCURRENT_DOWNLOADS': 3,
         'LOGLEVEL': 'INFO',
         'ENABLE_ACCESSLOG': 'false',
     }
 
-    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'DEFAULT_OPTION_PLAYLIST_STRICT_MODE', 'HTTPS', 'ENABLE_ACCESSLOG')
+    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG')
 
     def __init__(self):
         for k, v in self._DEFAULTS.items():
@@ -112,6 +131,10 @@ class Config:
         return (True, '')
 
 config = Config()
+# Align root logger level with Config (keeps a single source of truth).
+# This re-applies the log level after Config loads, in case LOGLEVEL was
+# overridden by config file settings or differs from the environment variable.
+logging.getLogger().setLevel(parseLogLevel(str(config.LOGLEVEL)) or logging.INFO)
 
 class ObjectSerializer(json.JSONEncoder):
     def default(self, obj):
@@ -140,7 +163,7 @@ class Notifier(DownloadQueueNotifier):
         await sio.emit('added', serializer.encode(dl))
 
     async def updated(self, dl):
-        log.info(f"Notifier: Download updated - {dl.title}")
+        log.debug(f"Notifier: Download updated - {dl.title}")
         await sio.emit('updated', serializer.encode(dl))
 
     async def completed(self, dl):
@@ -220,22 +243,25 @@ async def add(request):
     format = post.get('format')
     folder = post.get('folder')
     custom_name_prefix = post.get('custom_name_prefix')
-    playlist_strict_mode = post.get('playlist_strict_mode')
     playlist_item_limit = post.get('playlist_item_limit')
     auto_start = post.get('auto_start')
+    split_by_chapters = post.get('split_by_chapters')
+    chapter_template = post.get('chapter_template')
 
     if custom_name_prefix is None:
         custom_name_prefix = ''
     if auto_start is None:
         auto_start = True
-    if playlist_strict_mode is None:
-        playlist_strict_mode = config.DEFAULT_OPTION_PLAYLIST_STRICT_MODE
     if playlist_item_limit is None:
         playlist_item_limit = config.DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT
+    if split_by_chapters is None:
+        split_by_chapters = False
+    if chapter_template is None:
+        chapter_template = config.OUTPUT_TEMPLATE_CHAPTER
 
     playlist_item_limit = int(playlist_item_limit)
 
-    status = await dqueue.add(url, quality, format, folder, custom_name_prefix, playlist_strict_mode, playlist_item_limit, auto_start)
+    status = await dqueue.add(url, quality, format, folder, custom_name_prefix, playlist_item_limit, auto_start, split_by_chapters, chapter_template)
     return web.Response(text=serializer.encode(status))
 
 @routes.post(config.URL_PREFIX + 'delete')
@@ -376,7 +402,7 @@ async def on_prepare(request, response):
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
 
 app.on_response_prepare.append(on_prepare)
- 
+
 def supports_reuse_port():
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -386,21 +412,6 @@ def supports_reuse_port():
     except (AttributeError, OSError):
         return False
 
-def parseLogLevel(logLevel):
-    match logLevel:
-        case 'DEBUG':
-            return logging.DEBUG
-        case 'INFO':
-            return logging.INFO
-        case 'WARNING':
-            return logging.WARNING
-        case 'ERROR':
-            return logging.ERROR
-        case 'CRITICAL':
-            return logging.CRITICAL
-        case _:
-            return None
-
 def isAccessLogEnabled():
     if config.ENABLE_ACCESSLOG:
         return access_logger
@@ -408,7 +419,7 @@ def isAccessLogEnabled():
         return None
 
 if __name__ == '__main__':
-    logging.basicConfig(level=parseLogLevel(config.LOGLEVEL))
+    logging.getLogger().setLevel(parseLogLevel(config.LOGLEVEL) or logging.INFO)
     log.info(f"Listening on {config.HOST}:{config.PORT}")
 
     if config.HTTPS:
